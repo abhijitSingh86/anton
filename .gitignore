@@ -1,0 +1,138 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.venv/
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.idea_modules/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# PyTest
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Distribution / Packaging
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Anton/Modular Agents - Runtime Files
+.modular-agents/
+!.modular-agents/.gitkeep
+.modular-agents/checkpoints/
+.modular-agents/progress/
+.modular-agents/retries/
+.modular-agents/traces/
+.modular-agents/knowledge.json
+.modular-agents/custom.json
+.modular-agents/summary_*.md
+
+# Claude Code Settings
+.claude/settings.local.json
+
+# Knowledge Base
+knowledge.db
+knowledge.db-shm
+knowledge.db-wal
+
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# API Keys
+*.key
+secrets/
+credentials/
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Editor Backup Files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Logs
+*.log
+logs/
+
+# Temporary Session Files
+DOCUMENTATION_CLEANUP_SUMMARY.md
+
+# Test Coverage
+.coverage
+coverage.xml
+*.cover
+.hypothesis/
+
+# Documentation Build
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# Local Development
+*.local
+local/
+tmp/
+temp/
