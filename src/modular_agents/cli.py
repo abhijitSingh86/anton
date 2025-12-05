@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from pathlib import Path
 
 import click
@@ -88,12 +89,7 @@ def run(
 
     PATH is the repository to analyze (default: current directory).
     """
-    from modular_agents.trace import init_trace_logger
-
-    # Initialize trace logger
     repo_path = Path(path).resolve()
-    trace_dir = repo_path / ".modular-agents" / "traces" if (verbose or debug) else None
-    init_trace_logger(trace_dir=trace_dir, verbose=verbose, debug=debug)
 
     # Determine default model based on provider
     default_models = {
@@ -119,10 +115,12 @@ def run(
             )
 
     # Create config
+    task_id = str(uuid.uuid4())
     config = LLMConfig(
         model=model,
         api_key=api_key,
         base_url=base_url,
+        extra={"headers": {"X-Task-ID": task_id}},
     )
 
     # Set up knowledge store if requested
@@ -291,6 +289,7 @@ def analyze(path: str, as_json: bool):
 )
 @click.option("--model", "-m", default=None, help="Model name")
 @click.option("--api-key", "-k", envvar="LLM_API_KEY", default=None)
+@click.option("--base-url", default=None, help="API base URL (for OpenAI-compatible servers)")
 @click.option("--dry-run", is_flag=True, help="Show plan without executing")
 @click.option("--verbose", "-v", is_flag=True, help="Show LLM interactions")
 @click.option("--debug", "-d", is_flag=True, help="Show full debug output")
@@ -301,19 +300,23 @@ def analyze(path: str, as_json: bool):
     default="supervised",
     help="Autonomy level: interactive (ask always), supervised (ask for risky), autonomous (auto-approve with checks), full (no approval)",
 )
-@click.option("--auto-retry", is_flag=True, help="Automatically retry failed subtasks")
+@click.option("--auto-retry/--no-auto-retry", default=True, help="Automatically retry failed subtasks (default: enabled)")
 @click.option("--max-retries", type=int, default=3, help="Maximum retry attempts")
 @click.option("--resume", type=str, help="Resume from task ID (checkpoint)")
 @click.option("--no-checkpoint", is_flag=True, help="Disable automatic checkpointing")
 @click.option("--use-knowledge", "-kb", is_flag=True, help="Enable knowledge base (auto-enabled if repo is indexed)")
 @click.option("--kb-db", type=click.Path(), help="Knowledge base database path")
 @click.option("--embedding-model", default="sentence-transformers/all-MiniLM-L6-v2", help="Embedding model")
+@click.option("--enable-tools", is_flag=True, default=True, help="Enable tool calling (default: enabled)")
+@click.option("--no-tools", is_flag=True, help="Disable all tools")
+@click.option("--no-command-execution", is_flag=True, help="Disable command execution tools (read-only mode)")
 def task(
     path: str,
     task: str,
     provider: str,
     model: str,
     api_key: str,
+    base_url: str,
     dry_run: bool,
     verbose: bool,
     debug: bool,
@@ -326,18 +329,16 @@ def task(
     use_knowledge: bool,
     kb_db: str,
     embedding_model: str,
+    enable_tools: bool,
+    no_tools: bool,
+    no_command_execution: bool,
 ):
     """Execute a single task.
 
     PATH is the repository.
     TASK is the task description.
     """
-    from modular_agents.trace import get_trace_logger, init_trace_logger
-
-    # Initialize trace logger
     repo_path = Path(path).resolve()
-    trace_dir = repo_path / ".modular-agents" / "traces" if (verbose or debug) else None
-    init_trace_logger(trace_dir=trace_dir, verbose=verbose, debug=debug)
 
     default_models = {
         "claude": "claude-sonnet-4-20250514",
@@ -351,7 +352,12 @@ def task(
         env_vars = {"claude": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
         api_key = os.environ.get(env_vars.get(provider, ""))
 
-    config = LLMConfig(model=model, api_key=api_key)
+    config = LLMConfig(
+        model=model, 
+        api_key=api_key, 
+        base_url=base_url,
+        extra={"headers": {"X-Task-ID": str(uuid.uuid4())}},
+    )
 
     # Initialize continuation managers (ENABLED BY DEFAULT for best UX)
     checkpoint_manager = None
@@ -403,9 +409,9 @@ def task(
                 else:
                     db_path = Path.home() / ".modular-agents" / "knowledge.db"
 
-                # Check if database exists and if current repo is indexed
+                # Check if database exists
                 if db_path.exists():
-                    # Try to connect and check if repo is indexed
+                    # Try to connect - enable for ALL tasks to allow learning from indexed repos
                     try:
                         embedding_provider = GemmaEmbeddingProvider(
                             model_name=embedding_model,
@@ -414,21 +420,27 @@ def task(
                         knowledge_store = KnowledgeStore(db_path, embedding_provider)
                         knowledge_store.connect()
 
-                        # Check if current repo is indexed
+                        # Check if current repo is indexed (for informational message only)
                         repos = knowledge_store.list_repos()
                         repo_path_str = str(repo_path.resolve())
                         is_indexed = any(r.repo_path == repo_path_str for r in repos)
 
                         if is_indexed:
-                            console.print(f"[dim]✓ Knowledge base enabled (repository is indexed)[/dim]")
+                            console.print(f"[dim]✓ Knowledge base enabled (this repository is indexed)[/dim]")
                         else:
-                            knowledge_store.close()
-                            knowledge_store = None
+                            # Enable anyway - new repos can learn from indexed repos!
+                            indexed_count = len(repos)
+                            console.print(f"[dim]✓ Knowledge base enabled ({indexed_count} repositories indexed)[/dim]")
 
-                    except Exception:
+                    except Exception as e:
+                        console.print(f"[yellow]⚠ Failed to load knowledge base: {e}[/yellow]")
                         knowledge_store = None
             except ImportError:
                 pass  # Knowledge base dependencies not installed
+
+    # Determine tool settings
+    use_tools = enable_tools and not no_tools
+    allow_commands = not no_command_execution
 
     runtime = AgentRuntime(
         repo_path=repo_path,
@@ -440,10 +452,35 @@ def task(
         autonomy_config=autonomy_config,
         autonomy_manager=autonomy_manager,
         knowledge_store=knowledge_store,
+        enable_tools=use_tools,
+        allow_command_execution=allow_commands,
     )
 
     async def execute():
         await runtime.initialize()
+
+        # Detect language if unknown (always detect, only prompt in non-autonomous mode)
+        if runtime.repo_knowledge and runtime.repo_knowledge.modules:
+            from modular_agents.runtime import detect_language_from_text
+
+            for module in runtime.repo_knowledge.modules:
+                if module.language == "unknown":
+                    # Try to detect from task description first
+                    detected_lang = detect_language_from_text(task)
+
+                    if detected_lang:
+                        module.language = detected_lang
+                        console.print(f"[dim]✓ Detected language from task: {detected_lang}[/dim]")
+                    elif not autonomous:
+                        # Prompt user for language (only in non-autonomous mode)
+                        console.print(f"\n[yellow]Language not detected for module: {module.name}[/yellow]")
+                        lang = click.prompt(
+                            "Please specify the programming language",
+                            type=click.Choice(['scala', 'python', 'java', 'typescript', 'javascript', 'rust', 'go', 'cpp', 'csharp', 'ruby'], case_sensitive=False),
+                            default='scala'
+                        )
+                        module.language = lang.lower()
+                        console.print(f"[dim]✓ Language set to: {module.language}[/dim]")
 
         if dry_run:
             # Just show what would be done
@@ -478,11 +515,6 @@ def task(
             summary_path = repo_path / ".modular-agents" / f"summary_{result.task_id}.md"
             AgentSummaryReporter.save_learning_summary(result, str(summary_path), module_map)
 
-        # Save trace summary if tracing was enabled
-        trace_logger = get_trace_logger()
-        if trace_logger and trace_logger.trace_dir:
-            trace_logger.save_summary()
-
     asyncio.run(execute())
 
 
@@ -516,13 +548,7 @@ def resume(
     from modular_agents.checkpoint import CheckpointManager
     from modular_agents.progress import ProgressTracker
     from modular_agents.retry import RetryManager
-    from modular_agents.trace import init_trace_logger
-
     repo_path = Path(path).resolve()
-
-    # Initialize trace logger
-    trace_dir = repo_path / ".modular-agents" / "traces" if (verbose or debug) else None
-    init_trace_logger(trace_dir=trace_dir, verbose=verbose, debug=debug)
 
     # Check if checkpoint exists
     checkpoint_manager = CheckpointManager()
@@ -976,32 +1002,34 @@ def index(
         console.print("Run 'anton setup' first to initialize the knowledge base.")
         return
 
-    # Set up LLM
-    default_models = {
-        "claude": "claude-sonnet-4-20250514",
-        "openai": "gpt-4o",
-        "ollama": "llama3.1",
-    }
-    model = model or default_models.get(provider)
+    # Set up LLM only if not using simple parser
+    llm = None
+    if not simple_parser:
+        default_models = {
+            "claude": "claude-sonnet-4-20250514",
+            "openai": "gpt-4o",
+            "ollama": "llama3.1",
+        }
+        model = model or default_models.get(provider)
 
-    if not api_key and provider in ("claude", "openai"):
-        env_vars = {"claude": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
-        api_key = os.environ.get(env_vars.get(provider, ""))
+        if not api_key and provider in ("claude", "openai"):
+            env_vars = {"claude": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
+            api_key = os.environ.get(env_vars.get(provider, ""))
 
-        if not api_key:
-            # If using custom base_url (local server), use dummy key
-            if base_url:
-                api_key = "dummy-key-for-local-server"
-                console.print(f"[yellow]Using dummy API key for local server[/yellow]")
-            else:
-                console.print(f"[red]API key required for {provider}[/red]")
-                console.print(f"Set {env_vars.get(provider)} or use --api-key")
-                return
+            if not api_key:
+                # If using custom base_url (local server), use dummy key
+                if base_url:
+                    api_key = "dummy-key-for-local-server"
+                    console.print(f"[yellow]Using dummy API key for local server[/yellow]")
+                else:
+                    console.print(f"[red]API key required for {provider}[/red]")
+                    console.print(f"Set {env_vars.get(provider)} or use --api-key")
+                    return
 
-    llm_config = LLMConfig(model=model, api_key=api_key, base_url=base_url)
-    llm = LLMProviderRegistry.create(provider, llm_config)
+        llm_config = LLMConfig(model=model, api_key=api_key, base_url=base_url)
+        llm = LLMProviderRegistry.create(provider, llm_config)
 
-    console.print(f"[green]✓[/green] LLM provider: {provider} ({model})")
+        console.print(f"[green]✓[/green] LLM provider: {provider} ({model})")
 
     # Set up embedding provider
     embedding_provider = None
@@ -1028,6 +1056,9 @@ def index(
         parser = SimpleCodeParser()
         console.print("[yellow]Using simple regex-based parser (no LLM)[/yellow]")
     else:
+        if not llm:
+            console.print("[red]LLM required for LLM-assisted parsing[/red]")
+            return
         parser = LLMCodeParser(llm)
         console.print(f"[green]✓[/green] Using LLM-assisted parser")
 
@@ -1303,6 +1334,127 @@ def providers():
     console.print("  pip install modular-agents[openai]")
     console.print("  pip install modular-agents[ollama]")
     console.print("  pip install modular-agents[all]")
+
+
+@main.group()
+def proxy():
+    """Proxy commands for transparent LLM tracing."""
+    pass
+
+
+@proxy.command("start")
+@click.option(
+    "--host",
+    default="localhost",
+    help="Host to bind to (default: localhost)",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=8001,
+    help="Port to bind to (default: 8001)",
+)
+@click.option(
+    "--openai-backend",
+    default=None,
+    help="OpenAI backend URL (default: https://api.openai.com/v1)",
+)
+@click.option(
+    "--claude-backend",
+    default=None,
+    help="Claude backend URL (default: https://api.anthropic.com)",
+)
+def proxy_start(host: str, port: int, openai_backend: str, claude_backend: str):
+    """Start the LLM proxy server with configurable backends.
+
+    The proxy intercepts LLM API calls and logs them to a database
+    while forwarding requests to configured backends. This allows
+    transparent tracing without code changes.
+
+    Examples:
+        # Use with local LLM (OpenAI-compatible)
+        anton proxy start --openai-backend http://localhost:8000/v1
+
+        # Use with official APIs (default)
+        anton proxy start
+
+        # Custom port
+        anton proxy start --port 9000 --openai-backend http://localhost:8000/v1
+
+    Configure Anton to use proxy:
+        export OPENAI_BASE_URL=http://localhost:8001
+
+    Then use Anton normally (no --base-url flag needed):
+        anton task . "your task" --provider openai --model "your-model"
+    """
+    try:
+        from modular_agents.proxy import run_proxy
+    except ImportError:
+        console.print("[red]Proxy dependencies not installed![/red]")
+        console.print("Install with: pip install 'modular-agents[proxy]'")
+        return
+
+    console.print(f"[green]Starting Anton LLM Proxy...[/green]")
+    console.print(f"[dim]Proxy URL: http://{host}:{port}[/dim]")
+
+    # Show backend configuration
+    if openai_backend:
+        console.print(f"[dim]OpenAI backend: {openai_backend}[/dim]")
+    if claude_backend:
+        console.print(f"[dim]Claude backend: {claude_backend}[/dim]")
+
+    console.print(f"\n[cyan]Configure your environment:[/cyan]")
+    if openai_backend or not claude_backend:
+        console.print(f"  export OPENAI_BASE_URL=http://{host}:{port}")
+    if claude_backend or (not openai_backend and not claude_backend):
+        console.print(f"  export ANTHROPIC_BASE_URL=http://{host}:{port}")
+
+    console.print(f"\n[cyan]Then use Anton normally - no --base-url flag needed![/cyan]")
+    console.print(f"\n[cyan]Press Ctrl+C to stop the proxy[/cyan]\n")
+
+    try:
+        run_proxy(host=host, port=port, openai_backend=openai_backend, claude_backend=claude_backend)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Proxy stopped[/yellow]")
+
+
+@proxy.command("dashboard")
+@click.option(
+    "--host",
+    default="localhost",
+    help="Host to bind to (default: localhost)",
+)
+@click.option(
+    "--port",
+    type=int,
+    default=3000,
+    help="Port to bind to (default: 3000)",
+)
+def proxy_dashboard(host: str, port: int):
+    """Start the proxy dashboard for viewing traces.
+
+    The dashboard provides a web UI for viewing LLM calls captured
+    by the proxy server.
+
+    Examples:
+        anton proxy dashboard                    # Launch on localhost:3000
+        anton proxy dashboard --port 8080        # Launch on custom port
+    """
+    try:
+        from modular_agents.proxy.dashboard_server import run_dashboard
+    except ImportError:
+        console.print("[red]Dashboard dependencies not installed![/red]")
+        console.print("Install with: pip install 'modular-agents[proxy]'")
+        return
+
+    console.print(f"[green]Starting Proxy Dashboard...[/green]")
+    console.print(f"[dim]Dashboard URL: http://{host}:{port}[/dim]")
+    console.print(f"\n[cyan]Press Ctrl+C to stop the dashboard[/cyan]\n")
+
+    try:
+        run_dashboard(host=host, port=port)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dashboard stopped[/yellow]")
 
 
 if __name__ == "__main__":

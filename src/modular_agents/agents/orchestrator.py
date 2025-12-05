@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from modular_agents.knowledge.store import KnowledgeStore
     from modular_agents.progress import ProgressTracker
     from modular_agents.retry import RetryConfig, RetryManager
+    from modular_agents.tools.base import ToolRegistry
 
 
 class OrchestratorAgent(BaseAgent):
@@ -51,6 +52,7 @@ class OrchestratorAgent(BaseAgent):
         module_agents: dict[str, ModuleAgent],
         llm: LLMProvider,
         knowledge_store: KnowledgeStore | None = None,
+        tool_registry: ToolRegistry | None = None,
         checkpoint_manager: CheckpointManager | None = None,
         retry_manager: RetryManager | None = None,
         progress_tracker: ProgressTracker | None = None,
@@ -60,6 +62,7 @@ class OrchestratorAgent(BaseAgent):
         self.repo_knowledge = repo_knowledge
         self.module_agents = module_agents
         self.knowledge_store = knowledge_store
+        self.tool_registry = tool_registry
 
         # Continuation system components
         self.checkpoint_manager = checkpoint_manager
@@ -148,7 +151,6 @@ class OrchestratorAgent(BaseAgent):
                 "\n- Try rephrasing the task more specifically"
                 "\n- Verify modules exist: anton analyze ."
                 "\n- Run with --debug to see full LLM response"
-                "\n- Check trace logs in .modular-agents/traces/"
             )
 
             console.print(f"\n[bold red]Task Decomposition Failed[/bold red]")
@@ -298,6 +300,161 @@ class OrchestratorAgent(BaseAgent):
             console.print(f"[yellow]Warning: Knowledge base query failed: {e}[/yellow]")
             return ""
 
+    async def _explore_codebase_for_task(self, task_description: str) -> str:
+        """Actively explore codebase using tools to understand existing structure.
+
+        Args:
+            task_description: The task to explore for
+
+        Returns:
+            Formatted string with discovered code structure
+        """
+        if not self.tool_registry:
+            return ""
+
+        from rich.console import Console
+        console = Console()
+        console.print("[dim]🔍 Exploring codebase...[/dim]")
+
+        # Use LLM with tool calling to explore the codebase
+        exploration_prompt = f"""Before decomposing this task, explore the codebase to understand what already exists:
+
+Task: {task_description}
+
+Use available tools to:
+1. Find existing files related to this task (use grep_codebase)
+2. Check what models/classes already exist (use grep_codebase for "case class", "class", "trait")
+3. Identify existing API endpoints (use grep_codebase for "Method.GET", "Method.POST", etc.)
+4. Read relevant files to understand the architecture (use read_file)
+
+After exploring, respond with a summary in this format:
+```
+DISCOVERED:
+- Existing models: [list models found]
+- Existing endpoints: [list API endpoints found]
+- Relevant files: [list file paths]
+- Architecture notes: [observations about the codebase]
+```
+
+Focus on finding what ALREADY EXISTS so we don't duplicate or contradict it."""
+
+        try:
+            # Get tools in appropriate format
+            tools = self.tool_registry.to_anthropic_format()
+            if self.llm.name == "openai":
+                tools = self.tool_registry.to_openai_format()
+
+            # Build messages
+            messages = [{"role": "user", "content": exploration_prompt}]
+
+            # Tool calling loop
+            max_rounds = 5
+            tool_calls_made = False
+
+            for round_num in range(max_rounds):
+                # Call LLM with tools
+                response_text, tool_calls = await self.llm.chat_with_tools(
+                    messages=messages,
+                    system=self.system_prompt,
+                    tools=tools,
+                    max_tool_rounds=1,
+                )
+
+                # If no tool calls, we have final response
+                if not tool_calls:
+                    # Check if ANY tools were called during exploration
+                    if not tool_calls_made and round_num == 0:
+                        console.print(f"[yellow]⚠ LLM did not use tools - may not support tool calling[/yellow]")
+                        console.print(f"[yellow]  Skipping exploration (results may be hallucinated)[/yellow]")
+                        return ""  # Return empty to avoid using hallucinated data
+
+                    console.print(f"[dim]✓ Exploration complete ({round_num + 1} tool rounds)[/dim]")
+                    return f"\n## Codebase Exploration Results:\n{response_text}\n"
+
+                # Mark that we got tool calls
+                tool_calls_made = True
+
+                # Execute tool calls
+                for tool_call in tool_calls:
+                    result = await self.tool_registry.execute(tool_call)
+
+                    # Add assistant message with tool call
+                    messages.append({
+                        "role": "assistant",
+                        "content": [{"type": "tool_use", "id": tool_call.id, "name": tool_call.name, "input": tool_call.parameters}] if self.llm.name == "claude" else f"Calling tool: {tool_call.name}"
+                    })
+
+                    # Add tool result as user message
+                    if result.success:
+                        messages.append({
+                            "role": "user",
+                            "content": f"Tool result from {tool_call.name}:\n{result.output}"
+                        })
+                    else:
+                        messages.append({
+                            "role": "user",
+                            "content": f"Tool {tool_call.name} failed: {result.error}"
+                        })
+
+            # Max rounds exceeded - return what we have
+            console.print(f"[yellow]⚠ Exploration hit max rounds[/yellow]")
+            return "\n## Codebase Exploration: (partial results)\n"
+
+        except Exception as e:
+            console.print(f"[yellow]⚠ Exploration failed: {e}[/yellow]")
+            return ""
+
+    def _parse_exploration_results(self, exploration_text: str) -> dict:
+        """Parse exploration results to extract structured information.
+
+        Args:
+            exploration_text: Raw exploration results from LLM
+
+        Returns:
+            Dict with discovered files, models, endpoints
+        """
+        import re
+
+        discovered = {
+            "files": [],
+            "models": [],
+            "endpoints": [],
+            "notes": []
+        }
+
+        if not exploration_text:
+            return discovered
+
+        # Extract file paths (anything ending in .scala, .java, .py, etc.)
+        file_pattern = r'[\w/\-\.]+\.(scala|java|py|ts|js|go|rs)'
+        files = re.findall(file_pattern, exploration_text, re.IGNORECASE)
+        discovered["files"] = list(set(files))  # Deduplicate
+
+        # Extract model/class names (case class Foo, class Bar, trait Baz)
+        model_patterns = [
+            r'case class (\w+)',
+            r'class (\w+)',
+            r'trait (\w+)',
+            r'interface (\w+)',
+            r'type (\w+)',
+        ]
+        for pattern in model_patterns:
+            models = re.findall(pattern, exploration_text)
+            discovered["models"].extend(models)
+        discovered["models"] = list(set(discovered["models"]))
+
+        # Extract API endpoints (Method.GET /path, POST /path, etc.)
+        endpoint_pattern = r'(GET|POST|PUT|DELETE|PATCH)\s+([/\w\-{}:]+)'
+        endpoints = re.findall(endpoint_pattern, exploration_text, re.IGNORECASE)
+        discovered["endpoints"] = [f"{method} {path}" for method, path in endpoints]
+
+        # Extract architecture notes (lines containing "architecture", "pattern", "uses")
+        for line in exploration_text.split('\n'):
+            if any(keyword in line.lower() for keyword in ['architecture', 'pattern', 'uses', 'structure']):
+                discovered["notes"].append(line.strip())
+
+        return discovered
+
     async def decompose_task(
         self, task_id: str, description: str
     ) -> list[SubTask]:
@@ -307,13 +464,47 @@ class OrchestratorAgent(BaseAgent):
 
         console = Console()
 
-        # Get relevant code context from knowledge base
+        # Actively explore codebase first (using tools)
+        exploration_context = await self._explore_codebase_for_task(description)
+
+        # Parse exploration to extract structured data
+        discovered = self._parse_exploration_results(exploration_context)
+
+        # Get relevant code context from knowledge base (semantic search)
         code_context = await self._get_relevant_code_context(description)
 
         modules_info = "\n".join([
-            f"- {m.name}: {m.purpose}"
+            f"- {m.name}: {m.purpose}\n  Path: {m.path}  ⚠️ ALL files for this module MUST start with: {m.path}/"
             for m in self.repo_knowledge.modules
         ])
+
+        # Build explicit constraints from discovered data
+        discovered_files_str = ""
+        if discovered["files"]:
+            files_by_ext = {}
+            for f in discovered["files"]:
+                ext = f.split('.')[-1]
+                if ext not in files_by_ext:
+                    files_by_ext[ext] = []
+                files_by_ext[ext].append(f)
+
+            discovered_files_str = "\n## DISCOVERED FILES (USE THESE EXACT PATHS):\n"
+            for ext, files in files_by_ext.items():
+                discovered_files_str += f"\n{ext.upper()} files:\n"
+                for f in files[:10]:  # Limit to 10 per type
+                    discovered_files_str += f"  - {f}\n"
+
+        discovered_models_str = ""
+        if discovered["models"]:
+            discovered_models_str = f"\n## EXISTING MODELS/CLASSES (DO NOT RECREATE):\n"
+            for model in discovered["models"][:20]:  # Limit to 20
+                discovered_models_str += f"  - {model}\n"
+
+        discovered_endpoints_str = ""
+        if discovered["endpoints"]:
+            discovered_endpoints_str = f"\n## EXISTING API ENDPOINTS:\n"
+            for endpoint in discovered["endpoints"][:15]:  # Limit to 15
+                discovered_endpoints_str += f"  - {endpoint}\n"
 
         prompt = f"""Decompose this task into module-specific subtasks:
 
@@ -324,21 +515,44 @@ Available modules:
 
 Module dependencies:
 {json.dumps(self.repo_knowledge.dependency_graph, indent=2)}
+{discovered_files_str}
+{discovered_models_str}
+{discovered_endpoints_str}
 {code_context}
 
-Rules:
-1. Each subtask should be scoped to a single module
-2. Identify dependencies between subtasks
-3. Consider the module dependency graph for ordering
-4. IMPORTANT: You MUST respond with valid JSON only, no additional text
+CRITICAL RULES - FAILURE TO FOLLOW WILL CAUSE TASK FAILURE:
+1. ONLY use file paths from "DISCOVERED FILES" section above
+2. DO NOT create placeholder file names like "YourApiEndpoint.scala" or "User.scala"
+3. Work with EXISTING models from "EXISTING MODELS/CLASSES" section
+4. DO NOT duplicate existing models - modify or extend them instead
+5. Each subtask must be scoped to a single module
+6. Consider module dependencies for ordering
+7. You MUST respond with valid JSON only, no additional text
+8. 🚨 In subtask descriptions, INCLUDE the module's absolute path (shown above in "Available modules")
+9. 🚨 In affected_files, use FULL ABSOLUTE PATHS starting with the module's path
+10. 🚨 PROVIDE DETAILED CONTEXT in descriptions - what methods, fields, endpoints to create
+
+Example of GOOD subtask description:
+  "description": "Create UserRepository trait in /path/to/database/UserRepository.scala with methods: create(user: User): Task[User], findById(id: UUID): Task[Option[User]], findAll: Task[List[User]], update(id: UUID, user: User): Task[Option[User]], delete(id: UUID): Task[Boolean]. Follow existing repository patterns in the codebase."
+
+Example of BAD subtask description:
+  "description": "Create UserRepository.scala"  ← TOO VAGUE! Missing methods, path, and context
+
+IMPORTANT: Subtask descriptions must include:
+- WHAT to create/modify (specific class/trait name)
+- WHERE (full absolute path)
+- DETAILS (what methods, fields, endpoints, with signatures if applicable)
+- CONTEXT (follow existing patterns, use similar code as reference)
+
+If creating repositories, services, or APIs, specify the expected interface/methods based on similar existing code.
 
 Respond with ONLY this JSON structure (no markdown, no explanations):
 {{
   "subtasks": [
     {{
       "module": "module_name",
-      "description": "what to do in this module",
-      "affected_files": ["optional list of files"],
+      "description": "Detailed description with WHAT, WHERE, DETAILS, and CONTEXT",
+      "affected_files": ["FULL absolute paths from DISCOVERED FILES, e.g., /full/path/to/file.scala"],
       "depends_on": ["ids of subtasks that must complete first"]
     }}
   ]

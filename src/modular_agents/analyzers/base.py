@@ -62,11 +62,32 @@ class AnalyzerRegistry:
     
     @classmethod
     def get_analyzer(cls, path: Path) -> BaseAnalyzer | None:
-        """Get the appropriate analyzer for a project path."""
+        """Get the appropriate analyzer for a project path.
+
+        Prefers specific analyzers over generic ones.
+        """
+        # Try specific analyzers first (those with known project types)
+        specific_analyzers = []
+        generic_analyzers = []
+
         for analyzer_cls in cls._analyzers:
             analyzer = analyzer_cls()
+            # Generic analyzers have project_type == UNKNOWN
+            if analyzer.project_type.value == "unknown":
+                generic_analyzers.append(analyzer)
+            else:
+                specific_analyzers.append(analyzer)
+
+        # Check specific analyzers first
+        for analyzer in specific_analyzers:
             if analyzer.can_analyze(path):
                 return analyzer
+
+        # Fall back to generic analyzers
+        for analyzer in generic_analyzers:
+            if analyzer.can_analyze(path):
+                return analyzer
+
         return None
     
     @classmethod

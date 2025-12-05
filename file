@@ -1,0 +1,11 @@
+The page should not refersh automatically. It should work as single page app and appen data as and when available without refresh.
+Use a graph like canvas if that makes more sense to display the commmunication 
+possible flow can be 
+orchestator -> llm -> orchectator -> tool calls -> llm -> subagents -> tootle calls -> llm 
+
+Make sure when looking at a task, it is clearly trackable. An extension can be to update the request to LLM and check the new response, or compare it to 
+previous response in place so that it will be clearly visible. There can also be option to rerun the flow from that point to see if changin one prompt helps the overall pipeline. 
+
+If needed, create a totally seperate trace module with its own database, and spawn a proxy like interface to log each request from server. It will definately miss the tool calls but atleast the req/response can be logged without modifying exiating code. 
+
+In the end, we need a tracable and debuggable system where we can debug any communication in real time.

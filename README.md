@@ -5,9 +5,10 @@ A production-ready multi-agent framework for autonomous code development in modu
 ## ✨ Key Features
 
 - **🤖 Autonomous Development**: Long-running tasks with automatic checkpointing and resume
+- **🔧 Tool Calling**: Agents can read files, search code, run tests, and validate syntax autonomously
 - **🔄 Fault Tolerant**: Automatic retry with exponential backoff for transient failures
 - **📊 Real-Time Progress**: Track task completion and monitor live progress
-- **🛡️ Safety First**: Multiple validation layers with graduated autonomy levels
+- **🛡️ Safety First**: Multiple validation layers with graduated autonomy levels + command blocking
 - **🧠 Knowledge Base**: Semantic code search with vector embeddings
 - **⚡ Incremental Indexing**: 300x faster re-indexing by skipping unchanged files
 - **🔌 Pluggable LLM**: Works with Claude, OpenAI, Ollama, or any OpenAI-compatible API
@@ -99,11 +100,14 @@ anton enrich .
 # Basic task (uses smart defaults)
 anton task . "Add caching to UserRepository"
 
-# Autonomous mode with auto-retry
+# Autonomous mode (auto-retry enabled by default)
 anton task . "Refactor API layer" \
   --autonomous \
-  --auto-retry \
   --max-retries 5
+
+# Disable auto-retry if needed
+anton task . "Experimental change" \
+  --no-auto-retry
 
 # Interactive mode (asks before every action)
 anton task . "Update database schema" \
@@ -177,6 +181,41 @@ anton list-projects
 anton list-projects --json
 ```
 
+### Tool Calling (Enabled by Default)
+
+Agents automatically use tools to gather context and validate changes:
+
+```bash
+# Tools enabled by default (no flag needed)
+anton task . "Add caching to UserService"
+
+# Agents will automatically:
+# - Read existing code files
+# - Search for similar patterns
+# - Validate syntax before proposing
+# - Run tests to verify changes
+
+# Disable all tools
+anton task . "task description" --no-tools
+
+# Disable command execution only (read-only tools)
+anton task . "task description" --no-command-execution
+```
+
+**Available Tools**:
+- `read_file` - Read code files to understand implementation
+- `grep_codebase` - Search for patterns and function definitions
+- `search_knowledge_base` - Find similar code (requires indexed repo)
+- `validate_syntax` - Check syntax before proposing changes
+- `run_tests` - Execute tests to validate implementation
+- `run_command` - Run build commands and linters
+- `get_dependencies` - Extract module dependencies
+- `get_git_history` - View file commit history
+
+**Safety**: Dangerous commands (`rm -rf`, `format`, etc.) are automatically blocked.
+
+See [docs/TOOL_CALLING.md](docs/TOOL_CALLING.md) for full documentation.
+
 ### Interactive Mode
 
 ```bash
@@ -197,11 +236,14 @@ Commands in REPL:
 
 When you run `anton task`, these features are **enabled by default**:
 
+✅ **Tool Calling**: Agents can read files, search code, run tests, validate syntax
+✅ **Auto-Retry**: Automatically retry failed subtasks (up to 3 attempts)
 ✅ **Checkpointing**: Automatic save after each phase
 ✅ **Progress Tracking**: Real-time monitoring
 ✅ **Supervised Autonomy**: Auto-approve safe changes, ask for risky ones
 ✅ **Knowledge Base**: Semantic code search (if repository is indexed)
-✅ **Safety Checks**: File limits, forbidden paths, sensitive patterns
+✅ **Safety Checks**: File limits, forbidden paths, sensitive patterns, command blocking
+✅ **Validation**: Path checking, language enforcement, no placeholder code
 
 You don't need to configure anything - just run tasks!
 
@@ -291,9 +333,21 @@ anton task . "Add feature" --provider ollama --model llama3.1
 ### OpenAI-Compatible (vLLM, LM Studio, etc.)
 
 ```bash
-anton task . "Add feature" \
+
+ # In your environment or .env file
+ export CEREBRAS_API_KEY=csk-kn8yfhypj8kph2krjdydwtkf2wpx8h63hcrmwhpnxkh39dpk
+ export CEREBRAS_BASE_URL=https://api.cerebras.ai/v1
+
+  # Then use with Anton
+  anton task . "add an api endpoint to query user by enrollment date" \
+    --provider openai \
+    --base-url $CEREBRAS_BASE_URL \
+    --api-key $CEREBRAS_API_KEY \
+    --model llama-3.3-70b
+
+anton task . "add an api endpoint to query user by enrollment date" \
   --provider openai \
-  --model your-model \
+  --model local \
   --base-url http://localhost:8000/v1 \
   --api-key "not-needed"
 ```

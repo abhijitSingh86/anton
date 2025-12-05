@@ -13,26 +13,31 @@ Anton includes a comprehensive continuation system that enables long-running, fa
 
 ## Quick Start
 
-### Basic Usage (Default: Supervised Mode with Checkpointing)
+### Basic Usage (All Enabled by Default)
 
 ```bash
-# Run a task with automatic checkpointing and progress tracking
+# Run a task - these features are AUTOMATIC:
 anton task . "Add user authentication"
 
-# Task is automatically:
-# - Checkpointed after each phase
-# - Progress tracked in real-time
-# - Safe (supervised autonomy level)
+# Task automatically includes:
+# ✅ Checkpointing after each phase
+# ✅ Auto-retry (up to 3 attempts)
+# ✅ Progress tracking in real-time
+# ✅ Supervised autonomy (safe defaults)
+# ✅ Tool calling (read files, run tests, etc.)
 ```
 
-### Autonomous Mode with Auto-Retry
+### Autonomous Mode with Custom Retry Limit
 
 ```bash
 # For long-running tasks that can run unsupervised
 anton task . "Refactor API layer" \
   --autonomous \
-  --auto-retry \
   --max-retries 5
+
+# Disable auto-retry if needed (not recommended)
+anton task . "Experimental change" \
+  --no-auto-retry
 ```
 
 ### Resume After Interruption
@@ -269,6 +274,81 @@ anton progress <task_id>
 # Live monitoring
 anton progress <task_id> --watch
 ```
+
+## Recent Enhancements (2025-11-29)
+
+### Agent Scratchpad System
+
+Each agent now has a **scratchpad** - working memory that tracks discoveries, planning, and validation throughout task execution.
+
+**Features**:
+- **Discovery Tracking**: Records files found, patterns discovered, and knowledge base results
+- **Planning Phase**: Tracks files to create/modify, dependencies needed, and implementation approach
+- **Validation Gates**: Four automatic checkpoints:
+  - Path validation (ensures files stay within module boundaries)
+  - Duplicate detection (prevents creating the same file twice)
+  - Placeholder check (blocks code with TODOs or "not implemented" stubs)
+  - Language validation (ensures correct file extensions for language)
+- **Tool Usage Tracking**: Records which tools were used and what they discovered
+- **Automatic Retry with Feedback**: If validation fails, agent gets scratchpad summary for next attempt
+
+**Benefits**:
+- Better debugging - see exactly what agent discovered and why it made decisions
+- Fewer errors - validation gates catch common mistakes early
+- Smarter retries - agent learns from previous attempt via scratchpad feedback
+
+### Language Detection for Empty Repositories
+
+When starting a task in an empty repository, Anton now automatically detects the programming language from your task description.
+
+**Example**:
+```bash
+# Empty directory - no files to analyze
+mkdir my-new-service && cd my-new-service
+
+# Anton detects "Scala" from task description
+anton task . "Create a Scala User case class with id, name, email fields"
+
+# Output shows:
+# ✓ Detected language from task: scala
+# Creates: User.scala (not User.unk!)
+```
+
+**Supported Languages**: Scala, Python, Java, TypeScript, JavaScript, Rust, Go, C++, C#, Ruby
+
+**Fallback**: In non-autonomous mode, if language can't be detected, Anton will prompt you to select from supported languages.
+
+### Knowledge Base Enhancements
+
+The knowledge base system has been improved to enable **cross-repository learning**.
+
+**What Changed**:
+- Knowledge base is now **always enabled** if it exists (previously only for indexed repos)
+- New repositories can learn from previously indexed repositories
+- Fixed embeddings generation (2,915 embeddings for semantic search)
+- Corrected database location: `~/.modular-agents/knowledge.db`
+
+**Benefits**:
+```bash
+# Index your main project
+anton index /path/to/main-project
+
+# Work on NEW project - can learn from main project!
+cd /path/to/new-project
+anton task . "Create a repository like in main-project"
+# Agent will use search_knowledge_base to find similar patterns
+```
+
+**Example Use Case**:
+1. Index a mature Scala project with good patterns
+2. Start a new Scala microservice
+3. Agents automatically reference the indexed project for:
+   - Repository trait patterns
+   - JSON codec patterns
+   - ZIO HTTP endpoint structures
+   - Test patterns
+
+See `docs/KNOWLEDGE_BASE.md` for indexing commands.
 
 ## Examples
 

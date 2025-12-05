@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anton Proxy Dashboard - Conversation View</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --bg-tertiary: #0d0d0d;
+            --bg-message: #252525;
+            --border-color: #3d3d3d;
+            --text-primary: #e0e0e0;
+            --text-secondary: #95a5a6;
+            --text-muted: #666;
+            --accent-blue: #4a9eff;
+            --accent-purple: #9b59b6;
+            --accent-green: #4caf50;
+            --accent-orange: #ffa500;
+            --accent-red: #f44336;
+            --accent-yellow: #ffeb3b;
+            --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Monaco', 'Cascadia Code', monospace, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            padding: 1rem 2rem;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: var(--shadow);
+        }
+
+        h1 {
+            color: var(--accent-blue);
+            font-size: 1.5rem;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            height: 100vh;
+        }
+
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .sidebar-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+        }
+
+        .task-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .task-item {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .task-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .task-item.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .task-id {
+            font-family: monospace;
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        .task-meta {
+            font-size: 0.75rem;
+            opacity: 0.6;
+            margin-top: 0.25rem;
+        }
+
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .controls-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            align-items: center;
+            padding: 1rem 2rem;
+            /* Added padding for controls bar */
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .filter-group select {
+            padding: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+
+        .refresh-btn {
+            padding: 0.5rem 1rem;
+            background: var(--accent-blue);
+            color: #000;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .status {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .status.running {
+            background: var(--accent-orange);
+            color: #000;
+        }
+
+        .status.completed {
+            background: var(--accent-green);
+            color: #fff;
+        }
+
+        .status.failed {
+            background: var(--accent-red);
+            color: #fff;
+        }
+
+        /* Trace Container */
+        .trace-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 2rem;
+            overflow: hidden;
+        }
+
+        .trace-header {
+            padding: 1.5rem;
+            background: var(--bg-tertiary);
+            border-bottom: 2px solid var(--border-color);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .trace-header:hover {
+            background: #151515;
+        }
+
+        .trace-header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }
+
+        .trace-id {
+            font-family: monospace;
+            color: var(--accent-blue);
+            font-size: 0.9rem;
+        }
+
+        .trace-meta {
+            display: flex;
+            gap: 1.5rem;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .trace-body {
+            display: none;
+            padding: 1.5rem;
+        }
+
+        .trace-body.expanded {
+            display: block;
+        }
+
+        /* Agent Conversation */
+        .agent-conversation {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 1.5rem;
+            overflow: hidden;
+        }
+
+        .agent-header {
+            padding: 1rem 1.5rem;
+            background: linear-gradient(135deg, #2d2d2d 0%, #1f1f1f 100%);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .agent-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--accent-purple);
+        }
+
+        .agent-stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .conversation-flow {
+            padding: 1rem;
+        }
+
+        /* Message Bubbles */
+        .message {
+            margin-bottom: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            padding: 0 0.5rem;
+        }
+
+        .message-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .message-label.request {
+            color: var(--accent-yellow);
+        }
+
+        .message-label.response {
+            color: var(--accent-green);
+        }
+
+        .message-meta {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        .message-content {
+            background: var(--bg-message);
+            border-left: 3px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Cascadia Code', monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+        }
+
+        .message.request .message-content {
+            border-left-color: var(--accent-yellow);
+        }
+
+        .message.response .message-content {
+            border-left-color: var(--accent-green);
+        }
+
+        .message.error .message-content {
+            border-left-color: var(--accent-red);
+            background: #2d1515;
+        }
+
+        .json-content {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .text-content {
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        .expandable {
+            max-height: 300px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .expandable.expanded {
+            max-height: none;
+        }
+
+        .expand-btn {
+            margin-top: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            background: var(--border-color);
+            border: none;
+            border-radius: 4px;
+            color: var(--text-primary);
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .expand-btn:hover {
+            background: var(--accent-blue);
+            color: #000;
+        }
+
+        /* Timeline */
+        .timeline {
+            position: relative;
+            padding-left: 3rem;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 1rem;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: linear-gradient(to bottom, var(--accent-blue), var(--accent-purple), var(--accent-green));
+        }
+
+        .timeline-item {
+            position: relative;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .timeline-item::before {
+            content: '';
+            position: absolute;
+            left: -2.3rem;
+            top: 0.5rem;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+            border: 3px solid var(--bg-primary);
+            z-index: 1;
+        }
+
+        .timeline-time {
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            font-family: monospace;
+            margin-bottom: 0.5rem;
+        }
+
+        .timeline-agent {
+            font-weight: 600;
+            color: var(--accent-purple);
+            margin-bottom: 0.5rem;
+        }
+
+        .timeline-messages {
+            margin-left: 1rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--accent-blue);
+        }
+
+        .error {
+            background: #f443361a;
+            border: 1px solid var(--accent-red);
+            color: var(--accent-red);
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+
+        @media (max-width: 768px) {
+            .controls-bar {
+                flex-direction: column;
+            }
+
+            .search-box {
+                min-width: 100%;
+            }
+        }
+
+        /* Syntax Highlighting */
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 4px;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            font-family: 'Cascadia Code', 'Monaco', monospace;
+            overflow-x: auto;
+        }
+
+        .keyword {
+            color: #569cd6;
+        }
+
+        .string {
+            color: #ce9178;
+        }
+
+        .comment {
+            color: #6a9955;
+        }
+
+        .function {
+            color: #dcdcaa;
+        }
+
+        .number {
+            color: #b5cea8;
+        }
+
+        /* JSON Syntax Highlighting */
+        .json-key {
+            color: #9cdcfe;
+        }
+
+        .json-string {
+            color: #ce9178;
+        }
+
+        .json-boolean {
+            color: #569cd6;
+        }
+
+        .json-number {
+            color: #b5cea8;
+        }
+
+        /* Visual Timeline */
+        .visual-timeline {
+            margin: 1rem 0 2rem 0;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .timeline-track {
+            position: relative;
+            height: 30px;
+            margin-bottom: 5px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+
+        .timeline-bar {
+            position: absolute;
+            height: 100%;
+            border-radius: 4px;
+            opacity: 0.8;
+            transition: opacity 0.2s;
+            cursor: pointer;
+        }
+
+        .timeline-bar:hover {
+            opacity: 1;
+            z-index: 10;
+        }
+
+        .timeline-label {
+            position: absolute;
+            left: 5px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.75rem;
+            color: #fff;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 100%;
+            pointer-events: none;
+        }
+
+        .timeline-axis {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            border-top: 1px solid var(--border-color);
+            padding-top: 0.25rem;
+        }
+
+        /* Task Timeline Header */
+        .task-timeline-header {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .task-timeline-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 1rem;
+        }
+
+        .task-timeline-meta {
+            display: flex;
+            gap: 2rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .task-consolidated-timeline {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+
+        .task-timeline-legend {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 1rem;
+            font-size: 0.85rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .legend-color {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+        }
+
+        /* Call Detail Panel */
+        .call-detail-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-blue);
+            border-radius: 6px;
+            padding: 1rem;
+            margin-top: 1rem;
+            display: none;
+        }
+
+        .call-detail-panel.active {
+            display: block;
+        }
+
+        .call-detail-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .call-detail-title {
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+        }
+
+        .call-detail-close {
+            background: var(--border-color);
+            border: none;
+            color: var(--text-primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85rem;
+        }
+
+        .call-detail-close:hover {
+            background: var(--accent-red);
+        }
+
+        .call-detail-section {
+            margin-bottom: 1rem;
+        }
+
+        .call-detail-section-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-purple);
+            margin-bottom: 0.5rem;
+        }
+
+        .call-detail-content {
+            background: var(--bg-tertiary);
+            border-left: 3px solid var(--accent-blue);
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Cascadia Code', monospace;
+            font-size: 0.85rem;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                Tasks
+            </div>
+            <div id="task-list" class="task-list">
+                <!-- Tasks will be inserted here -->
+            </div>
+        </div>
+        <div class="main-content">
+            <header>
+                <h1>🔍 Anton Proxy Dashboard - Conversation View</h1>
+                <button class="refresh-btn" onclick="fetchTraces()">Refresh</button>
+            </header>
+
+            <div class="controls-bar">
+                <input type="text" class="search-box" placeholder="Search traces..." id="search-input">
+                <select class="filter-select" id="status-filter">
+                    <option value="all">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="failed">Failed</option>
+                </select>
+                <button class="refresh-btn" onclick="fetchTraces()">Refresh</button>
+            </div>
+
+            <div id="error-container"></div>
+            <div id="traces-container" style="flex: 1; overflow-y: auto; padding: 0 2rem;"></div>
+            <div id="loading" class="loading">Loading traces...</div>
+            <div id="empty-state" class="empty-state" style="display: none;">
+                <h2>No Traces Yet</h2>
+                <p>Traces will appear here when you run tasks through the proxy.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let allTraces = [];
+        let currentTaskId = null;
+        const callDataMap = new Map(); // Store call data to avoid JSON escaping issues
+
+        const state = {
+            searchQuery: '',
+            filterProvider: '', // This filter is no longer used in the UI but kept in state for now
+            filterStatus: 'all' // Default to 'all' for the new status filter
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            setupEventListeners();
+            fetchTasks();
+            fetchTraces();
+        });
+
+        function setupEventListeners() {
+            document.getElementById('search-input').addEventListener('input', (e) => {
+                state.searchQuery = e.target.value.toLowerCase();
+                filterAndDisplayTraces();
+            });
+
+            document.getElementById('status-filter').addEventListener('change', (e) => {
+                state.filterStatus = e.target.value;
+                filterAndDisplayTraces();
+            });
+        }
+
+        async function fetchTasks() {
+            try {
+                const response = await fetch(`${API_BASE}/api/tasks?limit=20`);
+                const data = await response.json();
+                displayTasks(data.tasks);
+            } catch (error) {
+                console.error('Failed to fetch tasks:', error);
+            }
+        }
+
+        function displayTasks(tasks) {
+            const container = document.getElementById('task-list');
+            container.innerHTML = `
+                <div class="task-item ${currentTaskId === null ? 'active' : ''}" onclick="selectTask(null)">
+                    <div class="task-id">All Tasks</div>
+                    <div class="task-meta">Show all traces</div>
+                </div>
+            `;
+
+            tasks.forEach(task => {
+                const date = new Date(task.created_at).toLocaleString();
+                container.innerHTML += `
+                    <div class="task-item ${currentTaskId === task.task_id ? 'active' : ''}" onclick="selectTask('${task.task_id}')">
+                        <div class="task-id">${task.task_id.substring(0, 8)}...</div>
+                        <div class="task-meta">${date}</div>
+                        <div class="task-meta">${task.trace_count} traces</div>
+                    </div>
+                `;
+            });
+        }
+
+        function selectTask(taskId) {
+            currentTaskId = taskId;
+            fetchTasks(); // Refresh list to update active state
+            fetchTraces();
+        }
+
+        async function fetchTraces() {
+            const loading = document.getElementById('loading');
+            const container = document.getElementById('traces-container');
+            const emptyState = document.getElementById('empty-state');
+            const errorContainer = document.getElementById('error-container');
+
+            loading.style.display = 'block';
+            container.style.display = 'none';
+            emptyState.style.display = 'none';
+            errorContainer.innerHTML = '';
+            errorContainer.style.display = 'none';
+
+            // Capture expanded state
+            const expandedTraces = new Set();
+            document.querySelectorAll('.trace-body.expanded').forEach(el => {
+                expandedTraces.add(el.id.replace('trace-body-', ''));
+            });
+
+            try {
+                let url = `${API_BASE}/api/traces?limit=50`;
+                if (currentTaskId) {
+                    url += `&task_id=${currentTaskId}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                const tracesWithCalls = await Promise.all(
+                    data.traces.map(async trace => {
+                        const detailResponse = await fetch(`${API_BASE}/api/traces/${trace.trace_id}`);
+                        return await detailResponse.json();
+                    })
+                );
+
+                allTraces = tracesWithCalls;
+                filterAndDisplayTraces();
+
+                // Restore expanded state
+                expandedTraces.forEach(traceId => {
+                    const body = document.getElementById(`trace-body-${traceId}`);
+                    if (body) {
+                        body.classList.add('expanded');
+                    }
+                });
+            } catch (error) {
+                showError('Failed to fetch traces: ' + error.message);
+            }
+        }
+
+        function filterAndDisplayTraces() {
+            const loading = document.getElementById('loading');
+            const container = document.getElementById('traces-container');
+            const emptyState = document.getElementById('empty-state');
+
+            loading.style.display = 'none';
+
+            if (!allTraces || allTraces.length === 0) {
+                emptyState.style.display = 'block';
+                container.style.display = 'none';
+                return;
+            }
+
+            let filtered = allTraces.filter(trace => {
+                if (state.searchQuery) {
+                    const searchStr = JSON.stringify(trace).toLowerCase();
+                    if (!searchStr.includes(state.searchQuery)) return false;
+                }
+
+                if (state.filterStatus && state.filterStatus !== 'all' && trace.status !== state.filterStatus) {
+                    return false;
+                }
+
+                if (state.filterProvider) {
+                    const hasProvider = trace.calls?.some(call => call.provider === state.filterProvider);
+                    if (!hasProvider) return false;
+                }
+
+                return true;
+            });
+
+            if (filtered.length === 0) {
+                emptyState.style.display = 'block';
+                container.style.display = 'none';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            container.style.display = 'block';
+            container.innerHTML = '';
+
+            // If a task is selected, show task-level timeline first
+            if (currentTaskId && filtered.length > 0) {
+                const taskTimelineEl = createTaskTimeline(filtered, currentTaskId);
+                container.appendChild(taskTimelineEl);
+            }
+
+            filtered.forEach(trace => {
+                const traceEl = createTraceElement(trace);
+                container.appendChild(traceEl);
+            });
+        }
+
+        function createTraceElement(trace) {
+            const container = document.createElement('div');
+            container.className = 'trace-container';
+
+            // Group calls by agent
+            const agentGroups = groupCallsByAgent(trace.calls || []);
+            const totalCalls = trace.calls?.length || 0;
+            const totalCost = trace.calls?.reduce((sum, call) => sum + (call.cost_usd || 0), 0) || 0;
+            const totalTokens = trace.calls?.reduce((sum, call) => sum + (call.tokens_input || 0) + (call.tokens_output || 0), 0) || 0;
+
+            container.innerHTML = `
+                <div class="trace-header" onclick="toggleTrace('${trace.trace_id}')">
+                    <div class="trace-header-top">
+                        <div class="trace-id">Trace: ${trace.trace_id}</div>
+                        <span class="status ${trace.status}">${trace.status}</span>
+                    </div>
+                    <div class="trace-meta">
+                        <span>Started: ${new Date(trace.created_at).toLocaleString()}</span>
+                        <span>${totalCalls} calls</span>
+                        <span>${Object.keys(agentGroups).length} agents</span>
+                        <span>${totalTokens.toLocaleString()} tokens</span>
+                        <span>$${totalCost.toFixed(4)}</span>
+                    </div>
+                </div>
+                <div id="trace-body-${trace.trace_id}" class="trace-body">
+                    <div class="visual-timeline">
+                        ${createVisualTimeline(trace.calls)}
+                    </div>
+                    <div class="timeline">
+                        ${createTimelineHTML(agentGroups)}
+                    </div>
+                </div>
+            `;
+
+            return container;
+        }
+
+        function groupCallsByAgent(calls) {
+            const groups = {};
+
+            calls.forEach(call => {
+                const agentName = call.agent_name || 'Orchestrator';
+                if (!groups[agentName]) {
+                    groups[agentName] = [];
+                }
+                groups[agentName].push(call);
+            });
+
+            // Sort calls within each agent by timestamp
+            Object.keys(groups).forEach(agent => {
+                groups[agent].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            });
+
+            return groups;
+        }
+
+        function createTimelineHTML(agentGroups) {
+            let html = '';
+
+            // Sort agent groups by the timestamp of their first call
+            const sortedAgents = Object.entries(agentGroups).sort((a, b) => {
+                return new Date(a[1][0].created_at) - new Date(b[1][0].created_at);
+            });
+
+            sortedAgents.forEach(([agentName, calls]) => {
+                const totalCost = calls.reduce((sum, call) => sum + (call.cost_usd || 0), 0);
+                const totalTokensIn = calls.reduce((sum, call) => sum + (call.tokens_input || 0), 0);
+                const totalTokensOut = calls.reduce((sum, call) => sum + (call.tokens_output || 0), 0);
+                const provider = calls[0]?.provider || 'unknown';
+                const model = calls[0]?.model || 'unknown';
+
+                html += `
+                    <div class="timeline-item">
+                        <div class="timeline-agent">${agentName}</div>
+                        <div class="timeline-time">${new Date(calls[0].created_at).toLocaleString()}</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                            ${provider.toUpperCase()} · ${model} · ${calls.length} turns · ${totalTokensIn}→${totalTokensOut} tokens · $${totalCost.toFixed(4)}
+                        </div>
+                        <div class="agent-conversation">
+                            <div class="conversation-flow">
+                                ${createConversationHTML(calls)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            return html;
+        }
+
+        function createConversationHTML(calls) {
+            let html = '';
+
+            calls.forEach((call, index) => {
+                const messages = JSON.parse(call.messages || '[]');
+                const hasResponse = call.response && call.response.trim();
+
+                // Request
+                html += `
+                    <div class="message request">
+                        <div class="message-header">
+                            <span class="message-label request">Request ${index + 1}</span>
+                            <div class="message-meta">
+                                <span>${new Date(call.created_at).toLocaleTimeString()}</span>
+                                <span>${call.tokens_input || 0} tokens</span>
+                            </div>
+                        </div>
+                        <div class="message-content">
+                            <div class="json-content expandable" id="req-${call.call_id}">
+${JSON.stringify(messages, null, 2)}
+                            </div>
+                            <button class="expand-btn" onclick="toggleExpand('req-${call.call_id}')">Show More</button>
+                        </div>
+                    </div>
+                `;
+
+                // Response
+                if (hasResponse) {
+                    html += `
+                        <div class="message response">
+                            <div class="message-header">
+                                <span class="message-label response">Response ${index + 1}</span>
+                                <div class="message-meta">
+                                    <span>${call.duration_ms ? Math.round(call.duration_ms) + 'ms' : 'N/A'}</span>
+                                    <span>${call.tokens_output || 0} tokens</span>
+                                    <span>${call.finish_reason || ''}</span>
+                                </div>
+                            </div>
+                            <div class="message-content">
+                                <div class="text-content expandable" id="res-${call.call_id}">
+${formatContent(call.response)}
+                                </div>
+                                <button class="expand-btn" onclick="toggleExpand('res-${call.call_id}')">Show More</button>
+                            </div>
+                        </div>
+                    `;
+                } else if (call.error) {
+                    html += `
+                        <div class="message error">
+                            <div class="message-header">
+                                <span class="message-label" style="color: var(--accent-red);">Error</span>
+                            </div>
+                            <div class="message-content">
+                                <div class="text-content">${escapeHtml(call.error)}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            });
+
+            return html;
+        }
+
+        function toggleTrace(traceId) {
+            const body = document.getElementById(`trace-body-${traceId}`);
+            body.classList.toggle('expanded');
+        }
+
+        function toggleExpand(elementId) {
+            const el = document.getElementById(elementId);
+            const btn = el.nextElementSibling;
+
+            if (el.classList.contains('expanded')) {
+                el.classList.remove('expanded');
+                btn.textContent = 'Show More';
+            } else {
+                el.classList.add('expanded');
+                btn.textContent = 'Show Less';
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function formatContent(text) {
+            if (!text) return '';
+            const escaped = escapeHtml(text);
+
+            // Simple syntax highlighting for code blocks
+            return escaped.replace(/```(\w*)([\s\S]*?)```/g, (match, lang, code) => {
+                return `<div class="code-block">${highlightSyntax(code, lang)}</div>`;
+            });
+        }
+
+        function highlightSyntax(code, lang) {
+            // Very basic syntax highlighting regexes
+            let html = code;
+            html = html.replace(/(&quot;|'|`)(.*?)\1/g, '<span class="string">$&</span>');
+            html = html.replace(/\b(function|return|var|let|const|if|else|for|while|class|import|from|def|async|await)\b/g, '<span class="keyword">$&</span>');
+            html = html.replace(/\b(\d+)\b/g, '<span class="number">$&</span>');
+            html = html.replace(/(\/\/.*$|#.*$)/gm, '<span class="comment">$&</span>');
+            return html;
+        }
+
+        function createVisualTimeline(calls) {
+            if (!calls || calls.length === 0) return '<div class="text-muted">No calls recorded</div>';
+
+            const sortedCalls = [...calls].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            const startTime = new Date(sortedCalls[0].created_at).getTime();
+            const lastCall = sortedCalls[sortedCalls.length - 1];
+            const endTime = new Date(lastCall.created_at).getTime() + (lastCall.duration_ms || 1000);
+            const totalDuration = Math.max(endTime - startTime, 1000); // Min 1s
+
+            let html = '';
+
+            sortedCalls.forEach(call => {
+                const callStart = new Date(call.created_at).getTime();
+                const duration = call.duration_ms || 100;
+
+                const left = ((callStart - startTime) / totalDuration) * 100;
+                const width = Math.max((duration / totalDuration) * 100, 0.5); // Min width visibility
+
+                const color = call.error ? 'var(--accent-red)' :
+                    (call.agent_name ? 'var(--accent-purple)' : 'var(--accent-blue)');
+
+                html += `
+                    <div class="timeline-track" title="${call.agent_name || 'System'}: ${Math.round(duration)}ms">
+                        <div class="timeline-bar" style="left: ${left}%; width: ${width}%; background: ${color};">
+                            <span class="timeline-label">${call.agent_name || 'System'}</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `
+                <div class="timeline-axis">
+                    <span>0s</span>
+                    <span>${(totalDuration / 1000).toFixed(1)}s</span>
+                </div>
+            `;
+
+            return html;
+        }
+
+        function createTaskTimeline(traces, taskId) {
+            const container = document.createElement('div');
+            container.className = 'task-timeline-header';
+
+            // Calculate task-level metrics
+            const allCalls = traces.flatMap(t => t.calls || []);
+            const totalCalls = allCalls.length;
+            const totalTokens = allCalls.reduce((sum, call) => sum + (call.tokens_input || 0) + (call.tokens_output || 0), 0);
+            const totalCost = allCalls.reduce((sum, call) => sum + (call.cost_usd || 0), 0);
+
+            // Find earliest and latest timestamps
+            const sortedCalls = [...allCalls].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            const startTime = sortedCalls.length > 0 ? new Date(sortedCalls[0].created_at) : new Date();
+            const lastCall = sortedCalls[sortedCalls.length - 1];
+            const endTime = lastCall ? new Date(lastCall.created_at).getTime() + (lastCall.duration_ms || 0) : startTime.getTime();
+            const totalDuration = Math.max(endTime - startTime.getTime(), 1000);
+
+            container.innerHTML = `
+                <div class="task-timeline-title">📊 Task Timeline: ${taskId.substring(0, 8)}...</div>
+                <div class="task-timeline-meta">
+                    <span><strong>${traces.length}</strong> traces</span>
+                    <span><strong>${totalCalls}</strong> LLM calls</span>
+                    <span><strong>${totalTokens.toLocaleString()}</strong> tokens</span>
+                    <span><strong>$${totalCost.toFixed(4)}</strong> cost</span>
+                    <span><strong>${(totalDuration / 1000).toFixed(1)}s</strong> duration</span>
+                </div>
+                <div class="task-consolidated-timeline">
+                    ${createConsolidatedTimeline(traces)}
+                </div>
+                <div class="task-timeline-legend">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--accent-purple);"></div>
+                        <span>Agent Calls</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--accent-blue);"></div>
+                        <span>System Calls</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background: var(--accent-red);"></div>
+                        <span>Errors</span>
+                    </div>
+                </div>
+            `;
+
+            return container;
+        }
+
+        function createConsolidatedTimeline(traces) {
+            const allCalls = traces.flatMap(t => (t.calls || []).map(call => ({
+                ...call,
+                trace_id: t.trace_id
+            })));
+
+            if (allCalls.length === 0) return '<div class="text-muted">No calls recorded</div>';
+
+            const sortedCalls = [...allCalls].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            const startTime = new Date(sortedCalls[0].created_at).getTime();
+            const lastCall = sortedCalls[sortedCalls.length - 1];
+            const endTime = new Date(lastCall.created_at).getTime() + (lastCall.duration_ms || 1000);
+            const totalDuration = Math.max(endTime - startTime, 1000);
+
+            let html = '<div style="min-height: 200px;">';
+
+            sortedCalls.forEach((call, index) => {
+                const callStart = new Date(call.created_at).getTime();
+                const duration = call.duration_ms || 100;
+
+                const left = ((callStart - startTime) / totalDuration) * 100;
+                const width = Math.max((duration / totalDuration) * 100, 0.5);
+
+                const color = call.error ? 'var(--accent-red)' :
+                    (call.agent_name ? 'var(--accent-purple)' : 'var(--accent-blue)');
+
+                const traceShort = call.trace_id.substring(0, 8);
+                const callId = `call-${call.call_id || index}`;
+
+                // Store call data in global map
+                callDataMap.set(callId, call);
+
+                html += `
+                    <div class="timeline-track" title="Trace: ${traceShort} | ${call.agent_name || 'System'}: ${Math.round(duration)}ms">
+                        <div class="timeline-bar" 
+                             style="left: ${left}%; width: ${width}%; background: ${color}; cursor: pointer;" 
+                             onclick="toggleCallDetail('${callId}')">
+                            <span class="timeline-label">${call.agent_name || 'System'}</span>
+                        </div>
+                    </div>
+                    <div id="${callId}" class="call-detail-panel"></div>
+                `;
+            });
+
+            html += `
+                <div class="timeline-axis">
+                    <span>0s</span>
+                    <span>${(totalDuration / 2000).toFixed(1)}s</span>
+                    <span>${(totalDuration / 1000).toFixed(1)}s</span>
+                </div>
+            </div>`;
+
+            return html;
+        }
+
+        function toggleCallDetail(callId) {
+            const panel = document.getElementById(callId);
+            const callData = callDataMap.get(callId);
+
+            if (!callData) {
+                console.error('Call data not found for:', callId);
+                return;
+            }
+
+            // Close all other panels
+            document.querySelectorAll('.call-detail-panel').forEach(p => {
+                if (p.id !== callId) p.classList.remove('active');
+            });
+
+            // Toggle this panel
+            if (panel.classList.contains('active')) {
+                panel.classList.remove('active');
+            } else {
+                panel.classList.add('active');
+                panel.innerHTML = createCallDetailHTML(callData);
+            }
+        }
+
+        function createCallDetailHTML(call) {
+            // messages might be a string or an object, normalize it
+            let messagesObj = call.messages;
+
+            // Always parse if it's a string (from database)
+            if (typeof messagesObj === 'string') {
+                try {
+                    messagesObj = JSON.parse(messagesObj);
+                } catch (e) {
+                    console.error('Failed to parse messages:', e, messagesObj);
+                    messagesObj = [];
+                }
+            }
+
+            // Ensure it's an array
+            if (!Array.isArray(messagesObj)) {
+                messagesObj = [];
+            }
+
+            const requestMessages = JSON.stringify(messagesObj, null, 2);
+            const response = call.response || 'No response recorded';
+            const error = call.error || null;
+
+            return `
+                <div class="call-detail-header">
+                    <div class="call-detail-title">
+                        📞 ${call.agent_name || 'System'} - ${call.provider} (${call.model})
+                    </div>
+                    <button class="call-detail-close" onclick="this.closest('.call-detail-panel').classList.remove('active')">Close</button>
+                </div>
+                <div class="call-detail-section">
+                    <div class="call-detail-section-title">📤 Request Messages</div>
+                    <div class="call-detail-content">${highlightJSON(requestMessages)}</div>
+                </div>
+                <div class="call-detail-section">
+                    <div class="call-detail-section-title">📥 Response</div>
+                    <div class="call-detail-content" style="border-left-color: var(--accent-green);">${escapeHtml(response)}</div>
+                </div>
+                ${error ? `
+                <div class="call-detail-section">
+                    <div class="call-detail-section-title" style="color: var(--accent-red);">❌ Error</div>
+                    <div class="call-detail-content" style="border-left-color: var(--accent-red);">${escapeHtml(error)}</div>
+                </div>
+                ` : ''}
+                <div class="call-detail-section">
+                    <div class="call-detail-section-title">📊 Metrics</div>
+                    <div class="call-detail-content">
+Duration: ${call.duration_ms}ms
+Tokens In: ${call.tokens_input || 0}
+Tokens Out: ${call.tokens_output || 0}
+Cost: $${(call.cost_usd || 0).toFixed(6)}
+Trace ID: ${call.trace_id}
+Call ID: ${call.call_id}
+Created: ${new Date(call.created_at).toLocaleString()}
+                    </div>
+                </div>
+            `;
+        }
+
+        function highlightJSON(jsonString) {
+            // Escape HTML first
+            let html = escapeHtml(jsonString);
+
+            // Highlight different JSON elements
+            html = html.replace(/(&quot;(\\.|[^&quot;\\])*&quot;)(\s*:)/g, '<span class="json-key">$1</span>$3'); // Keys
+            html = html.replace(/:\s*(&quot;(\\.|[^&quot;\\])*&quot;)/g, ': <span class="json-string">$1</span>'); // String values
+            html = html.replace(/:\s*\b(true|false|null)\b/g, ': <span class="json-boolean">$1</span>'); // Booleans/null
+            html = html.replace(/:\s*(-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>'); // Numbers
+
+            return html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `<div class="error">${message}</div>`;
+            setTimeout(() => errorContainer.innerHTML = '', 5000);
+        }
+    </script>
+</body>
+
+</html>

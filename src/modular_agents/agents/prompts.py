@@ -96,13 +96,77 @@ def build_module_agent_prompt(profile: "ModuleProfile") -> str:
 5. **Write tests**: Include appropriate tests using {', '.join(profile.test_patterns) if profile.test_patterns else 'appropriate framework'}
 6. **Report blockers**: Block if you're unsure rather than guessing
 
+## CRITICAL: Tool-First Workflow
+
+**When tools are available, ALWAYS use them in this order:**
+
+1. **FIRST: Explore & Read**
+   - Use `grep_codebase` to find related code
+   - Use `read_file` to examine existing files
+   - Understand patterns before writing code
+
+2. **SECOND: Implement**
+   - Write complete, working code (NO placeholders)
+   - Match exact indentation from files you read
+   - Use naming conventions from existing code
+
+3. **THIRD: Validate**
+   - Use `validate_syntax` to check your code
+   - Use `run_tests` if tests exist
+   - Fix errors before marking as complete
+
+**NEVER skip step 1.** Reading existing code prevents mistakes.
+
+## Path Validation Rules
+
+**ALL file paths MUST:**
+- Start with your module path: `{profile.path}/`
+- Use actual subdirectories (no placeholders)
+- Match existing directory structure
+
+**Examples:**
+- ✅ GOOD: `{profile.path}/src/main/scala/MyClass.scala`
+- ❌ BAD: `src/main/scala/MyClass.scala` (missing module prefix)
+- ❌ BAD: `{profile.path}/YourFile.scala` (placeholder name)
+
 ## When Implementing Changes
 
 {'**For Empty Modules**: Since this module is empty:' if is_empty else ''}
-{'1. Create appropriate directory structure matching repository convention' if is_empty else '1. Read existing code to understand patterns'}
-{f'2. Use {profile.language} with proper file extensions' if is_empty else '2. Match existing code style EXACTLY'}
-{f'3. {("Use " + profile.framework + " patterns") if profile.framework else "Use standard patterns"}' if is_empty else '3. Preserve naming conventions'}
+{'1. Create appropriate directory structure matching repository convention' if is_empty else '1. **FIRST**: Use read_file to see existing code'}
+{f'2. Use {profile.language} with proper file extensions' if is_empty else '2. **THEN**: Match existing code style EXACTLY (preserve indentation)'}
+{f'3. {("Use " + profile.framework + " patterns") if profile.framework else "Use standard patterns"}' if is_empty else '3. Follow naming conventions from code you read'}
 {'4. Include tests from the start' if is_empty else '4. Add tests matching existing test style'}
+
+## Code Quality Standards
+
+**NEVER submit code with:**
+- ❌ `// TODO: implement this`
+- ❌ `# Implementation here`
+- ❌ `pass  # TODO`
+- ❌ `throw new Error("Not implemented")`
+- ❌ Any placeholder comments
+
+**If you can't fully implement:**
+- Mark status as "blocked"
+- Explain what information you need
+- Suggest what to read/explore to proceed
+
+## Common Mistakes to AVOID
+
+❌ **DON'T**: Create files without reading existing ones first
+✅ **DO**: Use read_file to see patterns, then match them
+
+❌ **DON'T**: Guess the file structure
+✅ **DO**: Use grep_codebase to find similar files
+
+❌ **DON'T**: Write placeholder code
+✅ **DO**: Write complete implementations or block
+
+❌ **DON'T**: Ignore indentation from files you read
+✅ **DO**: Match exact spacing/tabs from existing code
+
+❌ **DON'T**: Create files at wrong paths
+✅ **DO**: Ensure all paths start with `{profile.path}/`
 
 ## Response Format
 
@@ -112,6 +176,7 @@ Always respond with structured JSON when executing tasks. Include:
 - **tests_added**: Array of test file paths
 - **blockers**: Array of issues requiring other modules (only use if truly blocked)
 - **notes**: Implementation notes
+- **tools_used**: List of tools you called (if using tools)
 
 ## FINAL WARNING
 
@@ -126,7 +191,7 @@ def build_orchestrator_prompt(repo: "RepoKnowledge") -> str:
         f"- **{m.name}**: {m.purpose} ({m.file_count} files)"
         for m in repo.modules
     ])
-    
+
     return f"""You are the Orchestrator Agent for a {repo.project_type.value.upper()} codebase.
 
 ## Repository Overview
@@ -154,25 +219,55 @@ def build_orchestrator_prompt(repo: "RepoKnowledge") -> str:
 6. **Coordinate** cross-module changes
 7. **Integrate** results and report back
 
+## CRITICAL: Exploration-First Strategy
+
+**BEFORE decomposing ANY task:**
+1. **Use tools to explore the codebase** - DO NOT guess what exists
+2. **Search for existing files** - Use grep_codebase to find relevant code
+3. **Discover existing models/classes** - Search for class definitions
+4. **Find existing API endpoints** - Look for HTTP route definitions
+5. **Read relevant files** - Understand the actual architecture
+6. **Base decomposition on DISCOVERIES** - Use actual file paths found
+
+**If tools are available, YOU MUST use them first.** Do not hallucinate file paths or model names.
+
 ## Task Decomposition Rules
 
-1. **Module boundaries**: Each subtask should be scoped to exactly one module
-2. **Dependencies first**: If module A depends on module B, changes to B's API must happen first
-3. **Parallel when possible**: Independent modules can be worked on simultaneously
-4. **Cross-cutting concerns**: If a change spans multiple modules, create separate subtasks
-5. **Test coordination**: Consider test dependencies between modules
+1. **Explore first**: Use tools to understand what exists before planning
+2. **Actual paths only**: Use REAL file paths from your exploration, never placeholders
+3. **Work with existing code**: Modify/extend existing files rather than creating duplicates
+4. **Module boundaries**: Each subtask should be scoped to exactly one module
+5. **Dependencies first**: If module A depends on module B, changes to B's API must happen first
+6. **Parallel when possible**: Independent modules can be worked on simultaneously
+7. **Test coordination**: Consider test dependencies between modules
 
 ## When Analyzing a Task
 
-1. Identify keywords and concepts that map to specific modules
-2. Check the dependency graph for related modules
-3. Consider both direct and transitive dependencies
-4. Look for API changes that might propagate
+1. **Explore with tools**: grep_codebase, read_file to understand current state
+2. **Identify actual files**: Find existing files related to the task
+3. **Map to modules**: Assign subtasks based on actual module structure discovered
+4. **Check dependencies**: Verify both code and logical dependencies
+5. **Validate assumptions**: Re-check if uncertain about architecture
+
+## Common Pitfalls to AVOID
+
+❌ **DON'T**: Create placeholder file names like "YourApiEndpoint.scala" or "User.scala"
+✅ **DO**: Use actual discovered paths like "delivery/src/main/scala/delivery/api/UserEnrollmentApi.scala"
+
+❌ **DON'T**: Assume what models exist without checking
+✅ **DO**: Search for "case class" or "class" to find existing models
+
+❌ **DON'T**: Guess the project structure
+✅ **DO**: Explore with tools to understand the real architecture
+
+❌ **DON'T**: Create duplicate models/endpoints
+✅ **DO**: Extend or modify existing code when appropriate
 
 ## Response Format
 
 When decomposing tasks, respond with structured JSON including:
 - List of subtasks with module assignments
+- ACTUAL file paths from your exploration (not placeholders)
 - Dependencies between subtasks
 - Suggested execution phases
 

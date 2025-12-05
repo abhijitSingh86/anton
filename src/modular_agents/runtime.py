@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -17,6 +18,38 @@ from modular_agents.core import RepoKnowledge, TaskResult, TaskStatus
 from modular_agents.llm import LLMConfig, LLMProvider, LLMProviderRegistry
 
 console = Console()
+
+
+def detect_language_from_text(text: str) -> str | None:
+    """Detect programming language from task description or keywords.
+
+    Args:
+        text: Task description or other text to analyze
+
+    Returns:
+        Detected language name or None if not detected
+    """
+    text_lower = text.lower()
+
+    # Language detection patterns (order matters - check specific before general)
+    patterns = [
+        (r'\bscala\b|\.scala\b|sbt\b|scalac\b|case class\b|trait\b', 'scala'),
+        (r'\bpython\b|\.py\b|pip\b|poetry\b|flask\b|django\b', 'python'),
+        (r'\bjava\b(?!script)|\.java\b|maven\b|gradle\b(?!\.js)', 'java'),
+        (r'\btypescript\b|\.ts\b|\.tsx\b', 'typescript'),
+        (r'\bjavascript\b|\.js\b|\.jsx\b|node\.js\b|npm\b|react\b', 'javascript'),
+        (r'\brust\b|\.rs\b|cargo\b', 'rust'),
+        (r'\bgo\b(?:\s|$)|golang\b|\.go\b', 'go'),
+        (r'\bc\+\+\b|cpp\b|\.cpp\b|\.hpp\b', 'cpp'),
+        (r'\bc#\b|csharp\b|\.cs\b|dotnet\b', 'csharp'),
+        (r'\bruby\b|\.rb\b|rails\b', 'ruby'),
+    ]
+
+    for pattern, language in patterns:
+        if re.search(pattern, text_lower):
+            return language
+
+    return None
 
 
 class AgentRuntime:
@@ -40,6 +73,8 @@ class AgentRuntime:
         progress_tracker: "ProgressTracker | None" = None,
         autonomy_config: "AutonomyConfig | None" = None,
         autonomy_manager: "AutonomyManager | None" = None,
+        enable_tools: bool = True,  # NEW: Enable tool calling by default
+        allow_command_execution: bool = True,  # NEW: Allow command execution tools
     ):
         self.repo_path = Path(repo_path).resolve()
         self.llm_provider_name = llm_provider
@@ -50,11 +85,14 @@ class AgentRuntime:
         self.progress_tracker = progress_tracker
         self.autonomy_config = autonomy_config
         self.autonomy_manager = autonomy_manager
+        self.enable_tools = enable_tools
+        self.allow_command_execution = allow_command_execution
 
         self.repo_knowledge: RepoKnowledge | None = None
         self.llm: LLMProvider | None = None
         self.orchestrator: OrchestratorAgent | None = None
         self.module_agents: dict[str, ModuleAgent] = {}
+        self.tool_registry = None  # Will be initialized if enable_tools is True
 
         self._initialized = False
     
@@ -127,22 +165,39 @@ class AgentRuntime:
         """Create all agents."""
         if not self.repo_knowledge or not self.llm:
             return
-        
+
+        # Initialize tool registry if enabled
+        if self.enable_tools:
+            from modular_agents.tools import register_default_tools
+
+            try:
+                self.tool_registry = register_default_tools(
+                    repo_path=str(self.repo_path),
+                    knowledge_store=self.knowledge_store,
+                    allow_commands=self.allow_command_execution,
+                )
+                console.print("[dim]✓ Tool calling enabled[/dim]")
+            except ImportError as e:
+                console.print(f"[yellow]⚠ Tool calling disabled: {e}[/yellow]")
+                self.tool_registry = None
+
         # Create module agents
         for module in self.repo_knowledge.modules:
             agent = ModuleAgent(
                 profile=module,
                 llm=self.llm,
                 repo_root=self.repo_path,
+                tool_registry=self.tool_registry,  # Pass tool registry
             )
             self.module_agents[module.name] = agent
-        
+
         # Create orchestrator
         self.orchestrator = OrchestratorAgent(
             repo_knowledge=self.repo_knowledge,
             module_agents=self.module_agents,
             llm=self.llm,
             knowledge_store=self.knowledge_store,
+            tool_registry=self.tool_registry,
             checkpoint_manager=self.checkpoint_manager,
             retry_manager=self.retry_manager,
             progress_tracker=self.progress_tracker,
@@ -170,6 +225,15 @@ class AgentRuntime:
         if not self.orchestrator:
             raise RuntimeError("Orchestrator not initialized. Set LLM config.")
 
+        # Detect and update language for unknown modules from task description
+        if self.repo_knowledge and self.repo_knowledge.modules:
+            for module in self.repo_knowledge.modules:
+                if module.language == "unknown":
+                    detected_lang = detect_language_from_text(task_description)
+                    if detected_lang:
+                        module.language = detected_lang
+                        console.print(f"[dim]✓ Detected language from task: {detected_lang}[/dim]")
+
         console.print(Panel(
             task_description,
             title="[bold]Task[/bold]" if not resume_from else "[bold]Resuming Task[/bold]",
@@ -194,36 +258,47 @@ class AgentRuntime:
         # Store module map for reporting
         self.last_module_map = getattr(self.orchestrator, 'module_map', {})
 
-        # Apply file changes if task completed successfully
-        if result.status.value == "completed" and result.subtask_results:
-            from modular_agents.file_writer import FileWriter
+        # Apply file changes from any successful subtasks
+        # Even if overall task failed/blocked, apply changes from completed subtasks
+        if result.subtask_results:
+            # Filter to only subtasks with changes
+            subtasks_with_changes = [r for r in result.subtask_results if r.changes]
 
-            console.print("\n[bold]Applying Changes to Disk[/bold]")
+            if subtasks_with_changes:
+                from modular_agents.file_writer import FileWriter
 
-            # Build module profiles map
-            module_profiles = {m.name: m for m in self.repo_knowledge.modules}
+                console.print("\n[bold]Applying Changes to Disk[/bold]")
 
-            summary = FileWriter.apply_subtask_results(
-                result.subtask_results,
-                self.repo_path,
-                module_profiles,
-                dry_run=False,
-                interactive=True,  # Ask for confirmation
-            )
+                # Build module profiles map
+                module_profiles = {m.name: m for m in self.repo_knowledge.modules}
 
-            # Show summary
-            if summary["validation_failures"]:
-                console.print(f"\n[red]⚠ {len(summary['validation_failures'])} validation failures[/red]")
-                result.error = f"Validation failures: {', '.join(summary['validation_failures'][:3])}"
-                result.status = TaskStatus.FAILED
+                # Determine if interactive mode should be used based on autonomy level
+                is_interactive = True
+                if self.autonomy_config:
+                    from modular_agents.autonomy import AutonomyLevel
+                    is_interactive = self.autonomy_config.level not in [AutonomyLevel.AUTONOMOUS, AutonomyLevel.FULL]
 
-            if summary["total_files"] > 0:
-                console.print(f"\n[green]File Changes Applied:[/green]")
-                console.print(f"  Created: {summary['created']}")
-                console.print(f"  Modified: {summary['modified']}")
-                console.print(f"  Deleted: {summary['deleted']}")
-                if summary['failed'] > 0:
-                    console.print(f"  [red]Failed: {summary['failed']}[/red]")
+                summary = FileWriter.apply_subtask_results(
+                    subtasks_with_changes,
+                    self.repo_path,
+                    module_profiles,
+                    dry_run=False,
+                    interactive=is_interactive,  # Ask for confirmation unless autonomous
+                )
+
+                # Show summary
+                if summary["validation_failures"]:
+                    console.print(f"\n[red]⚠ {len(summary['validation_failures'])} validation failures[/red]")
+                    result.error = f"Validation failures: {', '.join(summary['validation_failures'][:3])}"
+                    result.status = TaskStatus.FAILED
+
+                if summary["total_files"] > 0:
+                    console.print(f"\n[green]File Changes Applied:[/green]")
+                    console.print(f"  Created: {summary['created']}")
+                    console.print(f"  Modified: {summary['modified']}")
+                    console.print(f"  Deleted: {summary['deleted']}")
+                    if summary['failed'] > 0:
+                        console.print(f"  [red]Failed: {summary['failed']}[/red]")
 
         return result
 

@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import AsyncIterator
+from typing import AsyncIterator, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from modular_agents.tools.base import ToolCall
 
 
 @dataclass
@@ -66,7 +69,30 @@ class LLMProvider(ABC):
     ) -> AsyncIterator[str]:
         """Stream a completion for the given messages."""
         ...
-    
+
+    @abstractmethod
+    async def chat_with_tools(
+        self,
+        messages: list[dict],
+        system: str,
+        tools: list[dict],
+        max_tool_rounds: int = 5,
+    ) -> tuple[str | None, list[ToolCall]]:
+        """Chat with tool calling support.
+
+        Args:
+            messages: Conversation history in provider format
+            system: System prompt
+            tools: Available tools in provider format
+            max_tool_rounds: Maximum tool calling iterations
+
+        Returns:
+            Tuple of (final_response, tool_calls_made)
+            - If response is None, tool_calls will be populated
+            - If response is text, it's the final answer
+        """
+        ...
+
     def format_messages(
         self,
         messages: list[LLMMessage],
